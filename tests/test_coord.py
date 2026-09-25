@@ -1,5 +1,6 @@
 """Integration tests using independent clones and a real local Git remote."""
 
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -7,10 +8,18 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts' / 'coord.py'
 REF = 'refs/heads/coordination'
+
+
+def load_tracker():
+    spec = importlib.util.spec_from_file_location('coord_under_test', SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class CoordinationTests(unittest.TestCase):
@@ -106,6 +115,73 @@ class CoordinationTests(unittest.TestCase):
         self.assertEqual(before, self.git('--git-dir', str(self.remote), 'rev-parse', REF))
         self.assertEqual(self.state()['tasks'], {})
         self.command('list', worker='b')
+
+    def test_git_protocol_preserves_utf8_and_lf_with_windows_text_pipes(self):
+        tracker = load_tracker()
+        state = tracker.fresh_state()
+        args = tracker.parser().parse_args([
+            'create', 'Проверка ОС — 🚋', '--scope', 'src',
+            '--description', 'Первая строка\nВторая строка',
+        ])
+        tracker.mutate_task(args, state, 'worker-a', 'infra', 'portability-test')
+        real_run = subprocess.run
+
+        def windows_pipes(*args, **kwargs):
+            # Emulate Windows text pipes on every host while still using real
+            # Git objects. Binary pipes must bypass both locale and CRLF rules.
+            text_mode = kwargs.pop('text', False)
+            universal = kwargs.pop('universal_newlines', False)
+            encoding = kwargs.pop('encoding', None)
+            errors = kwargs.pop('errors', None)
+            text_mode = text_mode or universal or encoding is not None or errors is not None
+            encoding = encoding or pipe_encoding
+            if text_mode and kwargs.get('input') is not None:
+                kwargs['input'] = kwargs['input'].replace('\n', '\r\n').encode(encoding)
+            result = real_run(*args, **kwargs)
+            if text_mode:
+                result.stdout = result.stdout.decode(encoding).replace('\r\n', '\n')
+                result.stderr = result.stderr.decode(encoding).replace('\r\n', '\n')
+            return result
+
+        def raw_git(*args):
+            return real_run(
+                ['git', '--git-dir', str(self.remote), *args], env=self.env,
+                capture_output=True, check=True, timeout=20,
+            ).stdout
+
+        for pipe_encoding in ('utf-8', 'cp1252'):
+            with self.subTest(default_encoding=pipe_encoding):
+                with mock.patch.dict(os.environ, self.env, clear=True):
+                    with mock.patch.object(tracker.subprocess, 'run', side_effect=windows_pipes):
+                        commit = tracker.Remote(str(self.remote)).commit(state, None, 'Проверка ОС\n')
+                self.assertEqual(raw_git('ls-tree', '--name-only', '-z', commit),
+                                 b'BOARD.md\0state.json\0')
+                state_bytes = raw_git('show', f'{commit}:state.json')
+                board_bytes = raw_git('show', f'{commit}:BOARD.md')
+                expected_state = json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + '\n'
+                self.assertEqual(state_bytes, expected_state.encode('utf-8'))
+                self.assertEqual(board_bytes, tracker.render_board(state).encode('utf-8'))
+
+    def test_git_stdout_preserves_raw_control_characters(self):
+        tracker = load_tracker()
+        payload = 'Проверка\r\nимя\r\0конец\n'
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            oid = tracker.git(str(self.remote), 'hash-object', '-w', '--stdin',
+                              input_text=payload).stdout.strip()
+            restored = tracker.git(str(self.remote), 'cat-file', 'blob', oid).stdout
+        self.assertEqual(restored, payload)
+
+    def test_git_rejects_invalid_utf8_instead_of_replacing_task_text(self):
+        tracker = load_tracker()
+        result = subprocess.run(
+            ['git', '--git-dir', str(self.remote), 'hash-object', '-w', '--stdin'],
+            input=b'broken UTF-8: \xff', env=self.env, capture_output=True,
+            check=True, timeout=20,
+        )
+        oid = result.stdout.decode('ascii').strip()
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            with self.assertRaisesRegex(tracker.CoordError, 'invalid UTF-8'):
+                tracker.git(str(self.remote), 'cat-file', 'blob', oid)
 
     def test_simultaneous_creation_keeps_both_tasks(self):
         self.command('init')

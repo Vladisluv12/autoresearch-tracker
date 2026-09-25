@@ -123,8 +123,9 @@ def git(cwd: str, *args: str, input_text: str | None = None, check: bool = True,
                 env.pop(key, None)
     env.update({"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never", "LC_ALL": "C"})
     try:
-        result = subprocess.run(
-            ["git", "-C", cwd, *args], input=input_text, text=True,
+        raw_result = subprocess.run(
+            ["git", "-C", cwd, *args],
+            input=input_text.encode("utf-8") if input_text is not None else None,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
             timeout=GIT_TIMEOUT, check=False,
         )
@@ -133,6 +134,18 @@ def git(cwd: str, *args: str, input_text: str | None = None, check: bool = True,
     except subprocess.TimeoutExpired as exc:
         extra = " The push outcome is unknown; inspect the board before repeating the command." if args and args[0] == "push" else ""
         raise CoordError(f"Git timed out after {GIT_TIMEOUT} seconds.{extra}") from exc
+    # Git's plumbing is a byte protocol. Text-mode pipes translate LF to CRLF
+    # on Windows (including mktree paths), and use the machine's locale for
+    # Unicode. Keep UTF-8 bytes intact on every OS, including NUL delimiters.
+    try:
+        stdout = raw_result.stdout.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CoordError("Git returned invalid UTF-8; refusing to corrupt coordination data.") from exc
+    result = subprocess.CompletedProcess(
+        raw_result.args, raw_result.returncode,
+        stdout,
+        raw_result.stderr.decode("utf-8", errors="replace"),
+    )
     if check and result.returncode:
         detail = (result.stderr or result.stdout).strip()
         raise CoordError(f"Git {args[0]} failed: {redact(detail)}")
@@ -299,8 +312,8 @@ class Remote:
         entries = []
         for name, content in sorted(files.items()):
             oid = self.command("hash-object", "-w", "--stdin", input_text=content).stdout.strip()
-            entries.append(f"100644 blob {oid}\t{name}\n")
-        tree = self.command("mktree", input_text="".join(entries)).stdout.strip()
+            entries.append(f"100644 blob {oid}\t{name}\0")
+        tree = self.command("mktree", "-z", input_text="".join(entries)).stdout.strip()
         args = ["-c", "user.name=Coordination Tracker", "-c", "user.email=coordination@localhost", "-c", "commit.gpgsign=false", "commit-tree", tree]
         if parent:
             args.extend(["-p", parent])
