@@ -535,6 +535,11 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Task text is UTF-8; Windows pipes otherwise default to the ANSI codepage
+    # (e.g. cp1251), which cannot encode characters such as "→".
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     args = parser().parse_args(argv)
     try:
         root = repo_root()

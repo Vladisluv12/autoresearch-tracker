@@ -52,7 +52,7 @@ class CoordinationTests(unittest.TestCase):
     def git(self, *args, cwd=None, input=None):
         result = subprocess.run(
             ['git', *args], cwd=cwd or self.root, env=self.env,
-            input=input, text=True, capture_output=True, timeout=20,
+            input=input, encoding='utf-8', capture_output=True, timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout.strip()
@@ -61,7 +61,7 @@ class CoordinationTests(unittest.TestCase):
         env = dict(self.env, COORD_AGENT=agent or f'worker-{worker}', COORD_ROLE=role)
         result = subprocess.run(
             [sys.executable, str(SCRIPT), *args], cwd=getattr(self, worker),
-            env=env, capture_output=True, text=True, timeout=30,
+            env=env, capture_output=True, encoding='utf-8', timeout=30,
         )
         if ok:
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -75,7 +75,7 @@ class CoordinationTests(unittest.TestCase):
             processes.append(subprocess.Popen(
                 [sys.executable, str(SCRIPT), *args], cwd=getattr(self, worker),
                 env=dict(self.env, COORD_AGENT=f'worker-{worker}', COORD_ROLE='unassigned'),
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8',
             ))
         results = []
         try:
@@ -189,9 +189,12 @@ class CoordinationTests(unittest.TestCase):
         # This forces a genuine stale-CAS failure and a successful retry.
         gate = self.remote / 'push-attempts'
         gate.mkdir()
+        # Run the gate with this interpreter: Git runs hooks through sh, and on
+        # Windows `python3` on PATH may be the Microsoft Store stub.
+        gate_script = self.remote / 'gate.py'
         hook = self.remote / 'hooks' / 'pre-receive'
-        hook.write_text(
-            '#!/usr/bin/env python3\n'
+        hook.write_text(f'#!/bin/sh\nexec "{Path(sys.executable).as_posix()}" "{gate_script.as_posix()}"\n')
+        gate_script.write_text(
             'import os, pathlib, sys, time\n'
             f'gate = pathlib.Path({str(gate)!r})\n'
             "(gate / str(os.getpid())).write_text(sys.stdin.read())\n"
