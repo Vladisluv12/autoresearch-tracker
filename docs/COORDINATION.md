@@ -41,7 +41,7 @@ python3 scripts/coord.py resume T002
 
 python3 scripts/coord.py handoff T002 \
   --summary "Изменения: …; проверки: …; риски: …; ветка: …" \
-  --pr https://github.com/dub-otrezkov/claudes-tracker-harness/pull/123
+  --pr https://github.com/Vladisluv12/autoresearch-tracker/pull/123
 python3 scripts/coord.py done T002 --summary "Принято; PR объединён; проверки: …"
 
 python3 scripts/coord.py release T002 --reason "Передаю работу; ветка: …; осталось: …"

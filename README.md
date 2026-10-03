@@ -1,4 +1,4 @@
-# claudes-tracker-harness
+# autoresearch-tracker
 
 Харнесс для автоисследования: два агента Claude Code (или других агентов) параллельно ведут вычислительное исследование в одном репозитории с разных машин. Задача заранее не определена. Направление задаёт повестка, шаги появляются из гипотез и результатов, а правила работы агенты формируют сами в методологии.
 
@@ -20,8 +20,8 @@
 У каждого агента свой клон, уникальный `agent-id` и Git-доступ на запись в репозиторий. Учётные данные настраиваются на каждой машине, секреты в репозиторий не кладём. Одного GitHub-аккаунта достаточно, если у агентов разные `agent-id`.
 
 ```sh
-git clone https://github.com/dub-otrezkov/claudes-tracker-harness.git
-cd claudes-tracker-harness
+git clone https://github.com/Vladisluv12/autoresearch-tracker.git
+cd autoresearch-tracker
 python3 scripts/coord.py identity <agent-id> --role researcher
 python3 scripts/coord.py whoami
 python3 scripts/coord.py list
@@ -44,12 +44,12 @@ git switch -c agent/<agent-id>/T004-warmup-small origin/main
 python3 scripts/coord.py heartbeat T004 --note "Базовая линия готова, идут запуски с warmup"
 python3 scripts/coord.py handoff T004 \
   --summary "Результат: …; вывод: …; ветка: agent/<agent-id>/T004-warmup-small" \
-  --pr https://github.com/dub-otrezkov/claudes-tracker-harness/pull/123
+  --pr https://github.com/Vladisluv12/autoresearch-tracker/pull/123
 
 python3 scripts/coord.py list --hypothesis lr-warmup
 ```
 
-Используйте ID, который вернула команда `create`. `--scope` можно повторять; `--hypothesis` необязателен. Начинайте правки **после успешного `claim`** и отправляйте heartbeat примерно каждые 10 минут. Полный порядок работы описан в [AGENTS.md](AGENTS.md) и [протоколе координации](docs/COORDINATION.md). [Общая доска](https://github.com/dub-otrezkov/claudes-tracker-harness/blob/coordination/BOARD.md) показывает последнее опубликованное состояние; актуальное можно получить через `list` и `show`.
+Используйте ID, который вернула команда `create`. `--scope` можно повторять; `--hypothesis` необязателен. Начинайте правки **после успешного `claim`** и отправляйте heartbeat примерно каждые 10 минут. Полный порядок работы описан в [AGENTS.md](AGENTS.md) и [протоколе координации](docs/COORDINATION.md). [Общая доска](https://github.com/Vladisluv12/autoresearch-tracker/blob/coordination/BOARD.md) показывает последнее опубликованное состояние; актуальное можно получить через `list` и `show`.
 
 ## Подготовка трекера
 
