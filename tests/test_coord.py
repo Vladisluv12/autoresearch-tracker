@@ -310,6 +310,31 @@ class CoordinationTests(unittest.TestCase):
                      '--acceptance', 'No', '--scope', 'valid', '--depends-on', 'T999', ok=False)
         self.assertEqual(self.state()['tasks'], {})
 
+    def test_hypothesis_links_and_filters_tasks(self):
+        self.command('init')
+        linked = self.create('Warmup run', 'research/experiments/warmup', '--hypothesis', 'lr-warmup')
+        other = self.create('Untagged', 'src')
+        tasks = self.state()['tasks']
+        self.assertEqual(tasks[linked]['hypothesis'], 'lr-warmup')
+        self.assertIsNone(tasks[other]['hypothesis'])
+        listed = self.command('list', '--hypothesis', 'lr-warmup').stdout
+        self.assertIn(linked, listed)
+        self.assertNotIn(other, listed)
+        self.assertIn('lr-warmup', self.git('--git-dir', str(self.remote), 'show', f'{REF}:BOARD.md'))
+        for slug in ['Bad slug', '../escape', '-dash', '']:
+            with self.subTest(slug=slug):
+                self.command('create', 'Invalid', '--scope', 'x', '--hypothesis', slug, ok=False)
+        self.assertEqual(len(self.state()['tasks']), 2)
+
+    def test_tasks_created_before_hypotheses_remain_valid(self):
+        tracker = load_tracker()
+        state = tracker.fresh_state()
+        args = tracker.parser().parse_args(['create', 'Old task', '--scope', 'src'])
+        tracker.mutate_task(args, state, 'worker-a', 'infra', 'legacy-test')
+        del state['tasks']['T001']['hypothesis']
+        tracker.validate_state(state)
+        self.assertIn('Old task', tracker.render_board(state))
+
     def test_split_origin_uses_the_push_repository_for_reads_and_writes(self):
         self.command('init')
         upstream = self.root / 'unrelated-upstream.git'
